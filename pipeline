@@ -1,0 +1,54 @@
+
+1. align the read with bwa mem
+module load bwa
+bwa mem -M -t 8 -p /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta /sc/orga/projects/zhuj05a/jianxia/RNA/RNA_raw/S027_hgc-A_WUshanghuan-DNA_S27_L006_R1_001.fastq /sc/orga/projects/zhuj05a/jianxia/RNA/RNA_raw/S027_hgc-A_WUshanghuan-DNA_S27_L006_R2_001.fastq > 27.new.sam
+samtools view -bS 27.new.sam > 27.new.bam
+
+2. add read group
+module load java
+java -jar /hpc/packages/minerva-common/picard/1.93/bin/AddOrReplaceReadGroups.jar INPUT=27.new.bam OUTPUT=27.new.addgroup.bam RGID=27 RGSM=27 RGLB=DNA RGPL=illumina RGPU=none SO=coordinate
+
+3. mark duplicates
+java -Xmx8G -jar /hpc/packages/minerva-common/picard/1.93/bin/MarkDuplicates.jar INPUT=27.new.addgroup.bam OUTPUT=27.new.addgroup.dedupped.bam CREATE_INDEX=true VALIDATION_STRINGENCY=SILENT M=27.output.metrics
+
+4. read quality recalibration
+java -jar /hpc/packages/minerva-common/gatk/3.6-0/src/GenomeAnalysisTK.jar -T BaseRecalibrator -R /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta -I 27.new.addgroup.dedupped.bam -knownSites /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/dbsnp_138.hg19.vcf -knownSites /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/Mills_and_1000G_gold_standard.indels.hg19.sites.vcf -o 27.new.recal.table
+
+java -jar /hpc/packages/minerva-common/gatk/3.6-0/src/GenomeAnalysisTK.jar -T PrintReads -R /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta -I 27.new.addgroup.dedupped.bam -BQSR 27.new.recal.table -o 27.new.addgroup.dedupped.recal.bam
+
+5. call snp with haplotype
+java -jar /hpc/packages/minerva-common/gatk/3.6-0/src/GenomeAnalysisTK.jar -T HaplotypeCaller -R /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta -I 27.new.addgroup.dedupped.recal.bam -dontUseSoftClippedBases -stand_call_conf 20.0 -o 27.new.vcf
+
+7. variant filter:
+
+java -jar /hpc/packages/minerva-common/gatk/3.6-0/src/GenomeAnalysisTK.jar \ 
+    -T SelectVariants \ 
+    -R /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta \ 
+    -V 27.new.vcf \ 
+    -selectType SNP \ 
+    -o 27.new.snps.vcf 
+
+java -jar /hpc/packages/minerva-common/gatk/3.6-0/src/GenomeAnalysisTK.jar \ 
+    -T VariantFiltration \ 
+    -R /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta \ 
+    -V 27.new.snps.vcf \ 
+    --filterExpression "QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0 || SOR <3.0"\ 
+    --filterName "my_snp_filter" \ 
+    -o 27.new.filtered.snps.vcf 
+
+
+java -jar /hpc/packages/minerva-common/gatk/3.6-0/src/GenomeAnalysisTK.jar \ 
+    -T SelectVariants \ 
+    -R /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta \ 
+    -V 27.new.vcf \ 
+    -selectType INDEL \ 
+    -o 27.new.indels.vcf 
+
+java -jar /hpc/packages/minerva-common/gatk/3.6-0/src/GenomeAnalysisTK.jar \ 
+    -T VariantFiltration \ 
+    -R /hpc/users/wangm08/Wenhui/IBD/colon/data/gatk_somatic_snv/genome_dir/ucsc.hg19.fasta \ 
+    -V 27.new.indels.vcf \ 
+    --filterExpression "QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0 || SOR < 10.0"\ 
+    --filterName "my_indel_filter" \ 
+    -o 27.new.filtered.indels.vcf 
+8. annotation 
